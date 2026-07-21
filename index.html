@@ -214,6 +214,7 @@ License: MIT
     </div>
     <div class="row">
       <button class="btn ghost" id="sampleDataBtn">Use sample data</button>
+      <button class="btn ghost" id="copyAdsLinkBtn">Copy shareable link</button>
     </div>
     <div id="configStatus"></div>
     <h4 style="margin-top:16px;">Expected columns</h4>
@@ -227,6 +228,7 @@ License: MIT
     </div>
     <div class="row">
       <button class="btn ghost" id="trendsSampleDataBtn">Use sample data</button>
+      <button class="btn ghost" id="copyTrendsLinkBtn">Copy shareable link</button>
     </div>
     <div id="trendsConfigStatus"></div>
     <h4 style="margin-top:16px;">Expected columns</h4>
@@ -242,6 +244,7 @@ License: MIT
     </div>
     <div class="row">
       <button class="btn ghost" id="lpSampleDataBtn">Use sample data</button>
+      <button class="btn ghost" id="copyLpLinkBtn">Copy shareable link</button>
     </div>
     <div id="lpConfigStatus"></div>
     <h4 style="margin-top:16px;">Expected columns</h4>
@@ -752,16 +755,34 @@ function resetTrendsFiltersForNewData(){
   populateKeywordPills();
 }
 
+function buildShareLink(param, value){
+  const url = new URL(window.location.href);
+  if(value) url.searchParams.set(param, value);
+  else url.searchParams.delete(param);
+  return url.toString();
+}
+
+function copyLinkFeedback(btn, text){
+  navigator.clipboard.writeText(text).then(()=>{
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = original; }, 1600);
+  }).catch(()=>{
+    prompt('Copy this link:', text);
+  });
+}
+
 document.getElementById('trendsSampleDataBtn').addEventListener('click', ()=>{
   state.trendsData = SAMPLE_TRENDS_DATA;
   state.trendsSourceIsLive = false;
+  document.getElementById('trendsCsvUrlInput').value = '';
+  try { localStorage.removeItem('dash.trendsCsvUrl'); } catch(e) {}
   document.getElementById('trendsConfigStatus').textContent = 'Reset to sample data.';
   resetTrendsFiltersForNewData();
   render();
 });
 
-document.getElementById('loadTrendsCsvBtn').addEventListener('click', ()=>{
-  const url = document.getElementById('trendsCsvUrlInput').value.trim();
+function loadTrendsCsv(url){
   const statusEl = document.getElementById('trendsConfigStatus');
   if(!url){ statusEl.textContent = 'Paste a published Google Sheet CSV link first.'; return; }
   statusEl.textContent = 'Loading…';
@@ -784,18 +805,28 @@ document.getElementById('loadTrendsCsvBtn').addEventListener('click', ()=>{
     if(!rows.length) throw new Error('No valid rows found — check the column headers and date format.');
     state.trendsData = rows;
     state.trendsSourceIsLive = true;
+    try { localStorage.setItem('dash.trendsCsvUrl', url); } catch(e) {}
     statusEl.textContent = `Loaded ${rows.length} rows` + (skipped.length ? `, skipped ${skipped.length} row(s) with unreadable dates.` : '.');
     resetTrendsFiltersForNewData();
     render();
   }).catch(err=>{
     statusEl.textContent = 'Could not load that link (' + err.message + '). If this file is open from your computer rather than hosted online, the browser blocks the request — host it (e.g. GitHub Pages) or try again from there.';
   });
+}
+
+document.getElementById('loadTrendsCsvBtn').addEventListener('click', ()=>{
+  loadTrendsCsv(document.getElementById('trendsCsvUrlInput').value.trim());
+});
+document.getElementById('copyTrendsLinkBtn').addEventListener('click', function(){
+  copyLinkFeedback(this, buildShareLink('trends_csv', document.getElementById('trendsCsvUrlInput').value.trim()));
 });
 
 document.getElementById('sampleDataBtn').addEventListener('click', ()=>{
   state.data = SAMPLE_DATA;
   state.sourceIsLive = false;
   CURRENCY = '$';
+  document.getElementById('csvUrlInput').value = '';
+  try { localStorage.removeItem('dash.adsCsvUrl'); } catch(e) {}
   document.getElementById('sourceDot').classList.add('sample');
   document.getElementById('sourceLabel').textContent = 'SAMPLE DATA';
   document.getElementById('footerNote').textContent = 'Raw data: sample dataset embedded in this file.';
@@ -804,8 +835,7 @@ document.getElementById('sampleDataBtn').addEventListener('click', ()=>{
   render();
 });
 
-document.getElementById('loadCsvBtn').addEventListener('click', ()=>{
-  const url = document.getElementById('csvUrlInput').value.trim();
+function loadAdsCsv(url){
   const statusEl = document.getElementById('configStatus');
   if(!url){ statusEl.textContent = 'Paste a published Google Sheet CSV link first.'; return; }
   statusEl.textContent = 'Loading…';
@@ -840,6 +870,7 @@ document.getElementById('loadCsvBtn').addEventListener('click', ()=>{
     CURRENCY = detectedCurrency || '$';
     state.data = rows;
     state.sourceIsLive = true;
+    try { localStorage.setItem('dash.adsCsvUrl', url); } catch(e) {}
     document.getElementById('sourceDot').classList.remove('sample');
     document.getElementById('sourceLabel').textContent = 'LIVE — GOOGLE SHEET';
     document.getElementById('footerNote').textContent = 'Raw data: ' + url;
@@ -849,15 +880,36 @@ document.getElementById('loadCsvBtn').addEventListener('click', ()=>{
   }).catch(err=>{
     statusEl.textContent = 'Could not load that link (' + err.message + '). If this file is open from your computer rather than hosted online, the browser blocks the request — host it (e.g. GitHub Pages) or try again from there.';
   });
+}
+
+document.getElementById('loadCsvBtn').addEventListener('click', ()=>{
+  loadAdsCsv(document.getElementById('csvUrlInput').value.trim());
+});
+document.getElementById('copyAdsLinkBtn').addEventListener('click', function(){
+  copyLinkFeedback(this, buildShareLink('ads_csv', document.getElementById('csvUrlInput').value.trim()));
 });
 
 document.getElementById('lastRefreshed').textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
 
-// ---- init ----
-document.getElementById('rangePreset').value = 'last7';
-resetFiltersForNewData();
-resetTrendsFiltersForNewData();
-render();
+// ---- init: URL params take priority, then a locally-saved link, then sample data ----
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  let savedAds = null, savedTrends = null;
+  try { savedAds = localStorage.getItem('dash.adsCsvUrl'); } catch(e) {}
+  try { savedTrends = localStorage.getItem('dash.trendsCsvUrl'); } catch(e) {}
+  const adsUrl = params.get('ads_csv') || savedAds;
+  const trendsUrl = params.get('trends_csv') || savedTrends;
+  if(adsUrl){ document.getElementById('csvUrlInput').value = adsUrl; }
+  if(trendsUrl){ document.getElementById('trendsCsvUrlInput').value = trendsUrl; }
+
+  document.getElementById('rangePreset').value = 'last7';
+  resetFiltersForNewData();
+  resetTrendsFiltersForNewData();
+  render();
+
+  if(adsUrl) loadAdsCsv(adsUrl);
+  if(trendsUrl) loadTrendsCsv(trendsUrl);
+})();
 window.__renderAds = render;
 })();
 
@@ -1176,9 +1228,28 @@ function resetFiltersForNewData(){
   populatePagePills();
 }
 
+function buildShareLink(param, value){
+  const url = new URL(window.location.href);
+  if(value) url.searchParams.set(param, value);
+  else url.searchParams.delete(param);
+  return url.toString();
+}
+
+function copyLinkFeedback(btn, text){
+  navigator.clipboard.writeText(text).then(()=>{
+    const original = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(()=>{ btn.textContent = original; }, 1600);
+  }).catch(()=>{
+    prompt('Copy this link:', text);
+  });
+}
+
 document.getElementById('lpSampleDataBtn').addEventListener('click', ()=>{
   state.data = SAMPLE_DATA;
   state.sourceIsLive = false;
+  document.getElementById('lpCsvUrlInput').value = '';
+  try { localStorage.removeItem('dash.lpCsvUrl'); } catch(e) {}
   document.getElementById('lpSourceDot').classList.add('sample');
   document.getElementById('lpSourceLabel').textContent = 'SAMPLE DATA';
   document.getElementById('lpFooterNote').textContent = 'Raw data: sample dataset embedded in this file.';
@@ -1187,8 +1258,7 @@ document.getElementById('lpSampleDataBtn').addEventListener('click', ()=>{
   render();
 });
 
-document.getElementById('lpLoadCsvBtn').addEventListener('click', ()=>{
-  const url = document.getElementById('lpCsvUrlInput').value.trim();
+function loadLpCsv(url){
   const statusEl = document.getElementById('lpConfigStatus');
   if(!url){ statusEl.textContent = 'Paste a published Google Sheet CSV link first.'; return; }
   statusEl.textContent = 'Loading…';
@@ -1215,6 +1285,7 @@ document.getElementById('lpLoadCsvBtn').addEventListener('click', ()=>{
     if(!rows.length) throw new Error('No valid rows found — check the column headers and date format.');
     state.data = rows;
     state.sourceIsLive = true;
+    try { localStorage.setItem('dash.lpCsvUrl', url); } catch(e) {}
     document.getElementById('lpSourceDot').classList.remove('sample');
     document.getElementById('lpSourceLabel').textContent = 'LIVE — GOOGLE SHEET';
     document.getElementById('lpFooterNote').textContent = 'Raw data: ' + url;
@@ -1224,14 +1295,31 @@ document.getElementById('lpLoadCsvBtn').addEventListener('click', ()=>{
   }).catch(err=>{
     statusEl.textContent = 'Could not load that link (' + err.message + '). If this file is open from your computer rather than hosted online, the browser blocks the request — host it (e.g. GitHub Pages) or try again from there.';
   });
+}
+
+document.getElementById('lpLoadCsvBtn').addEventListener('click', ()=>{
+  loadLpCsv(document.getElementById('lpCsvUrlInput').value.trim());
+});
+document.getElementById('copyLpLinkBtn').addEventListener('click', function(){
+  copyLinkFeedback(this, buildShareLink('lp_csv', document.getElementById('lpCsvUrlInput').value.trim()));
 });
 
 document.getElementById('lpLastRefreshed').textContent = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
 
-// ---- init ----
-document.getElementById('lpRangePreset').value = 'last7';
-resetFiltersForNewData();
-render();
+// ---- init: URL param takes priority, then a locally-saved link, then sample data ----
+(function(){
+  const params = new URLSearchParams(window.location.search);
+  let savedLp = null;
+  try { savedLp = localStorage.getItem('dash.lpCsvUrl'); } catch(e) {}
+  const lpUrl = params.get('lp_csv') || savedLp;
+  if(lpUrl){ document.getElementById('lpCsvUrlInput').value = lpUrl; }
+
+  document.getElementById('lpRangePreset').value = 'last7';
+  resetFiltersForNewData();
+  render();
+
+  if(lpUrl) loadLpCsv(lpUrl);
+})();
 window.__renderLp = render;
 })();
 
